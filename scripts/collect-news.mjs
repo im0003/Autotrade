@@ -81,7 +81,9 @@ export async function collect({ prev = null, dartKey = "", nowMs = Date.now(), f
   } else status.push({ name: "DART 공시", ok: false, n: 0, err: "DART_API_KEY 없음" });
   const byId = new Map();
   for (const x of [...(prev?.items || []), ...fresh]) byId.set(x.id, x);       // 새 항목이 같은 id의 이전 항목을 덮어씀
-  const items = [...byId.values()].filter((x) => nowMs - (x.ts || nowMs) <= MAX_AGE_MS).sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, MAX_ITEMS);
+  const live = [...byId.values()].filter((x) => nowMs - (x.ts || nowMs) <= MAX_AGE_MS).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  // 공시는 접수 시각이 그날 09:00으로 잡혀 기사보다 오래돼 보이므로, 종류별로 따로 자른다(안 그러면 기사가 500건을 채워 공시가 밀려난다)
+  const items = [...live.filter((x) => x.kind === "dart").slice(0, 300), ...live.filter((x) => x.kind !== "dart").slice(0, MAX_ITEMS)].sort((a, b) => (b.ts || 0) - (a.ts || 0));
   return { updatedAt: nowMs, feeds: status, items };
 }
 
