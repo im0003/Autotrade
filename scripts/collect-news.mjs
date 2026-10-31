@@ -1,3 +1,7 @@
+// 뉴스(RSS) · 공시(DART) 수집기 — GitHub Actions에서 주기적으로 실행되어 news.json을 만든다.
+//  - 기사는 '제목·링크·시각'만 저장한다(본문 저장 안 함). 공시는 제목(보고서명)·종목코드·접수번호.
+//  - 피드 하나가 실패해도 나머지는 계속한다. 결과 파일에 피드별 성공/실패가 기록된다.
+//  - 사용: DART_API_KEY=... node scripts/collect-news.mjs [출력경로 기본 news.json]
 import fs from "node:fs";
 
 export const FEEDS = [
@@ -16,6 +20,7 @@ const ENT = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'
 const unesc = (s) => String(s || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&(?:amp|lt|gt|quot|apos|nbsp|#39);/g, (m) => ENT[m]).replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 const tag = (x, t) => { const m = new RegExp(`<${t}(?:\\s[^>]*)?>([\\s\\S]*?)</${t}>`, "i").exec(x); return m ? m[1] : ""; };
 
+/** RSS 2.0 / Atom 텍스트 → [{title, link, ts}] */
 export function parseFeed(xml) {
   const out = [];
   const blocks = String(xml).match(/<item[\s>][\s\S]*?<\/item>|<entry[\s>][\s\S]*?<\/entry>/gi) || [];
@@ -39,6 +44,8 @@ async function getText(url, ms = 15000) {
   try { return new TextDecoder(cs || "utf-8").decode(buf); } catch { return new TextDecoder("utf-8").decode(buf); }
 }
 
+/** 키 앞뒤 공백·따옴표·"Key" 접두어·줄바꿈 제거 */
+export const cleanKey = (k) => { let s = String(k || "").replace(/[\s"']/g, ""); if (/^key/i.test(s) && s.length === 43) s = s.slice(3); return s; };
 const kstDate = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, "");
 export async function fetchDart(key, nowMs = Date.now()) {
   const items = [];
@@ -46,10 +53,10 @@ export async function fetchDart(key, nowMs = Date.now()) {
   for (let page = 1; page <= 3; page++) {
     const u = `https://opendart.fss.or.kr/api/list.json?crtfc_key=${encodeURIComponent(key)}&bgn_de=${bgn}&end_de=${end}&page_no=${page}&page_count=100&sort=date&sort_mth=desc`;
     const j = JSON.parse(await getText(u));
-    if (j.status === "013") break;
+    if (j.status === "013") break;                       // 조회된 데이터 없음
     if (j.status !== "000") throw new Error(`DART ${j.status} ${j.message || ""}`);
     for (const x of j.list || []) {
-      if (!x.stock_code || !/^[YK]$/.test(x.corp_cls || "")) continue;
+      if (!x.stock_code || !/^[YK]$/.test(x.corp_cls || "")) continue;   // 코스피·코스닥 상장사만
       const d = x.rcept_dt || "";
       items.push({ id: `dart:${x.rcept_no}`, src: "DART", kind: "dart", title: `${x.corp_name} ${unesc(x.report_nm)}`, corp: x.corp_name, code: x.stock_code, report: unesc(x.report_nm), link: `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${x.rcept_no}`, ts: d ? Date.parse(`${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}T09:00:00+09:00`) : null, rcept: x.rcept_no });
     }
@@ -67,12 +74,13 @@ export async function collect({ prev = null, dartKey = "", nowMs = Date.now(), f
       status.push({ name: f.name, ok: true, n: xs.length });
     } catch (e) { status.push({ name: f.name, ok: false, n: 0, err: String(e.message || e).slice(0, 80) }); }
   }));
+  const rawKey = dartKey; dartKey = cleanKey(dartKey);
   if (dartKey) {
-    try { const d = await dartFn(dartKey, nowMs); fresh.push(...d); status.push({ name: "DART 공시", ok: true, n: d.length }); }
-    catch (e) { status.push({ name: "DART 공시", ok: false, n: 0, err: String(e.message || e).replace(dartKey, "***").slice(0, 80) }); }
+    try { const d = await dartFn(dartKey, nowMs); fresh.push(...d); status.push({ name: "DART 공시", ok: true, n: d.length, note: `키 ${dartKey.length}자` }); }
+    catch (e) { status.push({ name: "DART 공시", ok: false, n: 0, err: String(e.message || e).replace(dartKey, "***").slice(0, 80) + ` (키 ${dartKey.length}자${dartKey !== String(rawKey || "") ? ", 자동 정리됨" : ""})` }); }
   } else status.push({ name: "DART 공시", ok: false, n: 0, err: "DART_API_KEY 없음" });
   const byId = new Map();
-  for (const x of [...(prev?.items || []), ...fresh]) byId.set(x.id, x);
+  for (const x of [...(prev?.items || []), ...fresh]) byId.set(x.id, x);       // 새 항목이 같은 id의 이전 항목을 덮어씀
   const items = [...byId.values()].filter((x) => nowMs - (x.ts || nowMs) <= MAX_AGE_MS).sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, MAX_ITEMS);
   return { updatedAt: nowMs, feeds: status, items };
 }
