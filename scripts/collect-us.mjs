@@ -21,6 +21,7 @@ export const US_THEMES = [
   { id: "software", name: "AI 소프트웨어", kr: ["소프트웨어", "AI", "인공지능", "클라우드"], syms: ["PLTR", "NOW", "SNOW", "CRM"] },
   { id: "security", name: "사이버보안", kr: ["보안", "사이버"], syms: ["CRWD", "PANW", "FTNT"] },
   { id: "crypto", name: "가상자산", kr: ["가상화폐", "가상자산", "비트코인", "블록체인"], syms: ["COIN", "MSTR", "MARA"] },
+  { id: "oilgas", name: "석유·가스 시추", kr: ["시추", "석유", "가스", "해양플랜트", "자원개발"], syms: ["VAL", "RIG", "HAL", "PTEN", "HP", "NE", "OII"] },
   // 세부분류별 미국 종목(분류표 shared/themes.json 과 같아야 한다 — test/themes.test.js 가 확인)
   { id: "dcinfra.power_equip", sub: true, name: "데이터센터 인프라 · 전력기기·변압기", kr: [], syms: ["ETN","HUBB","POWL","GEV"] },
   { id: "dcinfra.gen", sub: true, name: "데이터센터 인프라 · 발전설비(가스터빈·원전·연료전지)", kr: [], syms: ["GEV","CEG","VST","BE","TLN"] },
@@ -32,6 +33,22 @@ export const US_THEMES = [
   { id: "dcinfra.idc", sub: true, name: "데이터센터 인프라 · IDC 통신·클라우드", kr: [], syms: ["EQIX","DLR"] },
   { id: "dcinfra.security", sub: true, name: "데이터센터 인프라 · 보안·관제", kr: [], syms: ["CRWD","PANW","FTNT"] },
   { id: "dcinfra.si", sub: true, name: "데이터센터 인프라 · SI·시설관리", kr: [], syms: ["PWR","EME","FIX","STRL"] },
+];
+/** 미국 업종·산업 등락(자동) — 대표 ETF 하루 등락으로 본다. [심볼, 한글 이름, 구분(sector 큰 업종 · industry 세부 산업), 우리 테마 id(없으면 null)]
+ *  테마(양자·데이터센터 냉각 같은 사람이 이름 붙인 묶음)가 아니라 공식에 가까운 분류이므로, "우리 테마에 없는데 오른 곳"을 놓치지 않기 위한 보조 지표다. ETF 는 업종의 대용품이라 구성이 정확히 같지는 않다. */
+export const US_SECTORS = [
+  ["XLE", "에너지", "sector", null], ["XLK", "기술", "sector", null], ["XLF", "금융", "sector", null], ["XLV", "헬스케어", "sector", null], ["XLY", "경기소비재", "sector", null], ["XLP", "필수소비재", "sector", null],
+  ["XLI", "산업재", "sector", null], ["XLB", "소재", "sector", null], ["XLU", "유틸리티", "sector", null], ["XLRE", "부동산", "sector", null], ["XLC", "커뮤니케이션", "sector", null],
+  ["XES", "석유 장비·서비스(시추)", "industry", "oilgas"], ["OIH", "석유 서비스(시추·유전)", "industry", "oilgas"], ["XOP", "석유·가스 탐사·생산", "industry", "oilgas"],
+  ["SMH", "반도체", "industry", "aichip"], ["XSD", "반도체(동일가중)", "industry", "aichip"], ["IGV", "소프트웨어", "industry", "software"], ["CLOU", "클라우드", "industry", "software"], ["AIQ", "인공지능", "industry", "software"],
+  ["HACK", "사이버보안", "industry", "security"], ["XBI", "바이오텍", "industry", "bio"], ["XPH", "제약", "industry", "bio"], ["IHI", "의료기기", "industry", null], ["XHS", "헬스케어 서비스", "industry", null],
+  ["XAR", "항공우주·방산", "industry", "space"], ["UFO", "우주", "industry", "space"], ["JETS", "항공사", "industry", null], ["XTN", "운송", "industry", null],
+  ["LIT", "리튬·배터리", "industry", "battery"], ["DRIV", "자율주행·전기차", "industry", "battery"], ["TAN", "태양광", "industry", null], ["ICLN", "청정에너지", "industry", null],
+  ["NLR", "원자력", "industry", "power"], ["URA", "우라늄", "industry", "power"], ["GRID", "스마트그리드", "industry", "dcinfra"], ["SRVR", "데이터센터", "industry", "dcinfra"],
+  ["BOTZ", "로봇·AI 장비", "industry", "robot"], ["QTUM", "양자컴퓨팅", "industry", "quantum"], ["BLOK", "블록체인", "industry", "crypto"], ["BITO", "비트코인 선물", "industry", "crypto"],
+  ["XME", "금속·광업", "industry", null], ["GDX", "금광", "industry", null], ["COPX", "구리", "industry", null], ["REMX", "희토류·전략금속", "industry", null], ["SLX", "철강", "industry", null],
+  ["KRE", "지역은행", "industry", null], ["KCE", "자본시장", "industry", null], ["KIE", "보험", "industry", null], ["XRT", "소매", "industry", null], ["XHB", "주택건설", "industry", null], ["PAVE", "인프라", "industry", null],
+  ["KWEB", "중국 인터넷", "industry", null], ["ESPO", "게임·e스포츠", "industry", null], ["MOO", "농업", "industry", null], ["ARKK", "혁신 성장(ARK)", "industry", null],
 ];
 export const US_INDEX = [["^GSPC", "S&P500"], ["^IXIC", "나스닥종합"], ["^DJI", "다우"], ["^SOX", "필라델피아반도체"], ["SPY", "S&P500 ETF(SPY)"], ["QQQ", "나스닥100 ETF(QQQ)"], ["SOXX", "반도체 ETF(SOXX)"]];
 
@@ -112,11 +129,14 @@ export async function getNews(sym, nowMs, f = fetch) {
 }
 /** 오늘 크게 움직인 종목(지수 제외) — 절대 등락 큰 순 */
 export const pickMovers = (got, skip = new Set()) => Object.entries(got).filter(([s, g]) => !s.startsWith("^") && !skip.has(s) && Math.abs(g.chg) >= MOVER_PCT).sort((a, b) => Math.abs(b[1].chg) - Math.abs(a[1].chg)).slice(0, MOVER_MAX).map(([s]) => s);
-export async function collectUs({ fetchImpl = fetch, nowMs = Date.now(), themes = US_THEMES, index = US_INDEX, krIndex = KR_INDEX } = {}) {
+export async function collectUs({ fetchImpl = fetch, nowMs = Date.now(), themes = US_THEMES, index = US_INDEX, krIndex = KR_INDEX, sectors = US_SECTORS } = {}) {
   const syms = [...new Set([...themes.flatMap((t) => t.syms), ...index.map((x) => x[0])])], got = {}, fail = {};
   for (let i = 0; i < syms.length; i += 4) await Promise.all(syms.slice(i, i + 4).map(async (s) => { const r = await getBars(s, fetchImpl); if (r.bars.length) got[s] = { ...lastChange(r.bars), src: r.src }; else fail[s] = r.errs; }));
   const th = themes.map((t) => { const mem = t.syms.map((s) => (got[s] ? { sym: s, chg: got[s].chg } : null)).filter(Boolean).sort((a, b) => b.chg - a.chg); const avg = mem.length ? +(mem.reduce((a, x) => a + x.chg, 0) / mem.length).toFixed(2) : null; return { id: t.id, ...(t.sub ? { sub: true } : {}), name: t.name, kr: t.kr, n: mem.length, of: t.syms.length, avg, members: mem }; }).filter((t) => t.avg != null && t.n >= Math.min(2, t.of)).sort((a, b) => b.avg - a.avg);
   const dates = Object.values(got).map((g) => g.d).sort();
+  const secOut = [], secFail = [];   // 업종·산업 ETF — 실패해도 나머지 수집에는 영향 없음
+  for (let i = 0; i < sectors.length; i += 4) await Promise.all(sectors.slice(i, i + 4).map(async ([sym, name, kind, theme]) => { try { const r = await getBars(sym, fetchImpl); const c = r.bars.length ? lastChange(r.bars) : null; if (c) secOut.push({ sym, name, kind, theme, chg: c.chg, d: c.d }); else secFail.push(sym); } catch { secFail.push(sym); } }));
+  secOut.sort((a, b) => b.chg - a.chg);
   const news = {}, newsFail = {};   // 큰 움직임 종목의 기사 — 실패해도 나머지 수집에는 영향 없음
   const movers = pickMovers(got, new Set(index.map((x) => x[0])));
   for (let i = 0; i < movers.length; i += 4) await Promise.all(movers.slice(i, i + 4).map(async (s) => { const r = await getNews(s, nowMs, fetchImpl); if (r.items.length) news[s] = r.items; else newsFail[s] = r.errs || []; }));
@@ -124,11 +144,12 @@ export async function collectUs({ fetchImpl = fetch, nowMs = Date.now(), themes 
   for (const [sym, name] of [["KRW=X", "원/달러"], ["CL=F", "WTI 유가"]]) { try { const r = await getBars(sym, fetchImpl); const c = r.bars.length ? lastChange(r.bars) : null; if (c) market[name] = { close: c.close, chg: c.chg }; } catch { /* 건너뜀 */ } }
   const krIdx = {}, krFail = {};
   for (const [sym, name] of krIndex) { const k = await getKrIdx(sym, fetchImpl); if (k.rows.length) krIdx[name] = k.rows; else krFail[name] = k.err; }
-  return { at: nowMs, market, news, ...(Object.keys(newsFail).length ? { newsFail } : {}), movers, krIdx, ...(Object.keys(krFail).length ? { krFail } : {}), session: dates.at(-1) || "", indices: index.map(([s, n]) => (got[s] ? { sym: s, name: n, chg: got[s].chg } : null)).filter(Boolean), themes: th, failed: Object.keys(fail).length, failDetail: fail, ok: Object.keys(got).length, total: syms.length };
+  return { at: nowMs, market, news, ...(Object.keys(newsFail).length ? { newsFail } : {}), movers, krIdx, ...(Object.keys(krFail).length ? { krFail } : {}), session: dates.at(-1) || "", indices: index.map(([s, n]) => (got[s] ? { sym: s, name: n, chg: got[s].chg } : null)).filter(Boolean), themes: th, failed: Object.keys(fail).length, failDetail: fail, ok: Object.keys(got).length, total: syms.length, sectors: secOut, ...(secFail.length ? { sectorsFail: secFail } : {}) };
 }
 /** 새로 받은 결과 r 을 이전 파일 prev 와 합친다. 미국 종목을 하나도 못 받았으면 이전 미국 요약을 그대로 두고(stale 표시), 지수 일봉은 새로 받은 것만 덮어쓴다.
  *  반환 {out, usable}: usable=false 면 새로 얻은 것도, 이전에 있던 것도 없다 → 실패 처리 */
 export function mergeWithPrev(r, prev) {
+  if (!(r.sectors?.length) && Array.isArray(prev?.sectors) && prev.sectors.length) r = { ...r, sectors: prev.sectors };   // 업종을 못 받으면 이전 값 유지
   const hasUs = r.ok > 0, hasKr = Object.keys(r.krIdx || {}).length > 0;
   if (hasUs && hasKr) return { out: r, usable: true, note: "" };
   const p = prev && typeof prev === "object" ? prev : {};
@@ -145,6 +166,7 @@ if (process.argv[1] && process.argv[1].endsWith("collect-us.mjs")) {
     console.log(`OK ${r.ok}/${r.total} 종목 · 기준일 ${r.session} · 상위 테마: ${r.themes.slice(0, 3).map((t) => `${t.name} ${t.avg}%`).join(", ")}`);
     console.log(`국내 지수 일봉: ${Object.entries(r.krIdx).map(([k, v]) => `${k} ${v.length}일(마지막 ${v[v.length - 1][0]})`).join(", ") || "없음"}${r.krFail ? ` · 실패 ${JSON.stringify(r.krFail)}` : ""}`);
     console.log(`큰 움직임(±${MOVER_PCT}%) ${r.movers.length}종목 중 기사 ${Object.keys(r.news).length}종목 받음${r.newsFail ? ` · 실패 예) ${Object.entries(r.newsFail).slice(0, 3).map(([k, v]) => `${k}: ${v.join(" / ")}`).join(" | ")}` : ""}`);
+    console.log(`업종·산업 ETF ${r.sectors.length}/${US_SECTORS.length}개 받음${r.sectors.length ? ` · 가장 센 곳: ${r.sectors.slice(0, 3).map((x) => `${x.name} ${x.chg}%`).join(", ")}` : ""}${r.sectorsFail ? ` · 실패 ${r.sectorsFail.join(",")}` : ""}`);
     if (r.failed) { const ex = Object.entries(r.failDetail).slice(0, 5).map(([k, v]) => `${k}: ${v.join(" / ")}`); console.log(`실패 ${r.failed}개 — 예) ${ex.join(" | ")}`); }
     let prev = null; try { prev = JSON.parse(fs.readFileSync(out, "utf8")); } catch { /* 이전 파일 없음 */ }
     const m = mergeWithPrev(r, prev);
