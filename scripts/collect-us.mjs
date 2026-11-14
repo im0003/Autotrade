@@ -72,9 +72,11 @@ export async function collectUs({ fetchImpl = fetch, nowMs = Date.now(), themes 
   for (let i = 0; i < syms.length; i += 4) await Promise.all(syms.slice(i, i + 4).map(async (s) => { const r = await getBars(s, fetchImpl); if (r.bars.length) got[s] = { ...lastChange(r.bars), src: r.src }; else fail[s] = r.errs; }));
   const th = themes.map((t) => { const mem = t.syms.map((s) => (got[s] ? { sym: s, chg: got[s].chg } : null)).filter(Boolean).sort((a, b) => b.chg - a.chg); const avg = mem.length ? +(mem.reduce((a, x) => a + x.chg, 0) / mem.length).toFixed(2) : null; return { id: t.id, name: t.name, kr: t.kr, n: mem.length, of: t.syms.length, avg, members: mem }; }).filter((t) => t.avg != null && t.n >= Math.min(2, t.of)).sort((a, b) => b.avg - a.avg);
   const dates = Object.values(got).map((g) => g.d).sort();
+  const market = {};   // 원/달러·WTI 유가 (야후). 실패하면 비워 둔다(화면에서는 '—')
+  for (const [sym, name] of [["KRW=X", "원/달러"], ["CL=F", "WTI 유가"]]) { try { const r = await getBars(sym, fetchImpl); const c = r.bars.length ? lastChange(r.bars) : null; if (c) market[name] = { close: c.close, chg: c.chg }; } catch { /* 건너뜀 */ } }
   const krIdx = {}, krFail = {};
   for (const [sym, name] of krIndex) { const k = await getKrIdx(sym, fetchImpl); if (k.rows.length) krIdx[name] = k.rows; else krFail[name] = k.err; }
-  return { at: nowMs, krIdx, ...(Object.keys(krFail).length ? { krFail } : {}), session: dates.at(-1) || "", indices: index.map(([s, n]) => (got[s] ? { sym: s, name: n, chg: got[s].chg } : null)).filter(Boolean), themes: th, failed: Object.keys(fail).length, failDetail: fail, ok: Object.keys(got).length, total: syms.length };
+  return { at: nowMs, market, krIdx, ...(Object.keys(krFail).length ? { krFail } : {}), session: dates.at(-1) || "", indices: index.map(([s, n]) => (got[s] ? { sym: s, name: n, chg: got[s].chg } : null)).filter(Boolean), themes: th, failed: Object.keys(fail).length, failDetail: fail, ok: Object.keys(got).length, total: syms.length };
 }
 /** 새로 받은 결과 r 을 이전 파일 prev 와 합친다. 미국 종목을 하나도 못 받았으면 이전 미국 요약을 그대로 두고(stale 표시), 지수 일봉은 새로 받은 것만 덮어쓴다.
  *  반환 {out, usable}: usable=false 면 새로 얻은 것도, 이전에 있던 것도 없다 → 실패 처리 */
