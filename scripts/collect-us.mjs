@@ -21,6 +21,17 @@ export const US_THEMES = [
   { id: "software", name: "AI 소프트웨어", kr: ["소프트웨어", "AI", "인공지능", "클라우드"], syms: ["PLTR", "NOW", "SNOW", "CRM"] },
   { id: "security", name: "사이버보안", kr: ["보안", "사이버"], syms: ["CRWD", "PANW", "FTNT"] },
   { id: "crypto", name: "가상자산", kr: ["가상화폐", "가상자산", "비트코인", "블록체인"], syms: ["COIN", "MSTR", "MARA"] },
+  // 세부분류별 미국 종목(분류표 shared/themes.json 과 같아야 한다 — test/themes.test.js 가 확인)
+  { id: "dcinfra.power_equip", sub: true, name: "데이터센터 인프라 · 전력기기·변압기", kr: [], syms: ["ETN","HUBB","POWL","GEV"] },
+  { id: "dcinfra.gen", sub: true, name: "데이터센터 인프라 · 발전설비(가스터빈·원전·연료전지)", kr: [], syms: ["GEV","CEG","VST","BE","TLN"] },
+  { id: "dcinfra.ess", sub: true, name: "데이터센터 인프라 · ESS·전력저장", kr: [], syms: ["FLNC","EOSE","GNRC"] },
+  { id: "dcinfra.backup", sub: true, name: "데이터센터 인프라 · 비상발전·백업전원", kr: [], syms: ["GNRC","CAT","CMI"] },
+  { id: "dcinfra.cooling", sub: true, name: "데이터센터 인프라 · 액침냉각·공조·배관", kr: [], syms: ["VRT","MOD","TT","CARR"] },
+  { id: "dcinfra.network", sub: true, name: "데이터센터 인프라 · 네트워크·광통신", kr: [], syms: ["ANET","CRDO","ALAB","CIEN","LITE"] },
+  { id: "dcinfra.memory", sub: true, name: "데이터센터 인프라 · 메모리·스토리지", kr: [], syms: ["MU","WDC","STX","SNDK","PSTG"] },
+  { id: "dcinfra.idc", sub: true, name: "데이터센터 인프라 · IDC 통신·클라우드", kr: [], syms: ["EQIX","DLR"] },
+  { id: "dcinfra.security", sub: true, name: "데이터센터 인프라 · 보안·관제", kr: [], syms: ["CRWD","PANW","FTNT"] },
+  { id: "dcinfra.si", sub: true, name: "데이터센터 인프라 · SI·시설관리", kr: [], syms: ["PWR","EME","FIX","STRL"] },
 ];
 export const US_INDEX = [["^GSPC", "S&P500"], ["^IXIC", "나스닥종합"], ["^DJI", "다우"], ["^SOX", "필라델피아반도체"], ["SPY", "S&P500 ETF(SPY)"], ["QQQ", "나스닥100 ETF(QQQ)"], ["SOXX", "반도체 ETF(SOXX)"]];
 
@@ -70,7 +81,7 @@ async function getBars(sym, f = fetch) {
 export async function collectUs({ fetchImpl = fetch, nowMs = Date.now(), themes = US_THEMES, index = US_INDEX, krIndex = KR_INDEX } = {}) {
   const syms = [...new Set([...themes.flatMap((t) => t.syms), ...index.map((x) => x[0])])], got = {}, fail = {};
   for (let i = 0; i < syms.length; i += 4) await Promise.all(syms.slice(i, i + 4).map(async (s) => { const r = await getBars(s, fetchImpl); if (r.bars.length) got[s] = { ...lastChange(r.bars), src: r.src }; else fail[s] = r.errs; }));
-  const th = themes.map((t) => { const mem = t.syms.map((s) => (got[s] ? { sym: s, chg: got[s].chg } : null)).filter(Boolean).sort((a, b) => b.chg - a.chg); const avg = mem.length ? +(mem.reduce((a, x) => a + x.chg, 0) / mem.length).toFixed(2) : null; return { id: t.id, name: t.name, kr: t.kr, n: mem.length, of: t.syms.length, avg, members: mem }; }).filter((t) => t.avg != null && t.n >= Math.min(2, t.of)).sort((a, b) => b.avg - a.avg);
+  const th = themes.map((t) => { const mem = t.syms.map((s) => (got[s] ? { sym: s, chg: got[s].chg } : null)).filter(Boolean).sort((a, b) => b.chg - a.chg); const avg = mem.length ? +(mem.reduce((a, x) => a + x.chg, 0) / mem.length).toFixed(2) : null; return { id: t.id, ...(t.sub ? { sub: true } : {}), name: t.name, kr: t.kr, n: mem.length, of: t.syms.length, avg, members: mem }; }).filter((t) => t.avg != null && t.n >= Math.min(2, t.of)).sort((a, b) => b.avg - a.avg);
   const dates = Object.values(got).map((g) => g.d).sort();
   const market = {};   // 원/달러·WTI 유가 (야후). 실패하면 비워 둔다(화면에서는 '—')
   for (const [sym, name] of [["KRW=X", "원/달러"], ["CL=F", "WTI 유가"]]) { try { const r = await getBars(sym, fetchImpl); const c = r.bars.length ? lastChange(r.bars) : null; if (c) market[name] = { close: c.close, chg: c.chg }; } catch { /* 건너뜀 */ } }
