@@ -1,4 +1,5 @@
 name: collect-us
+# 미국 마감 요약(us.json)을 모읍니다. 시간은 UTC(한국 = UTC+9): 한국 화~토 06:40 · 07:10 · 08:10.
 on:
   workflow_dispatch:
   schedule:
@@ -7,6 +8,9 @@ on:
     - cron: "10 23 * * 1-5"
 permissions:
   contents: write
+concurrency:
+  group: repo-write   # news.yml · us.yml 이 같은 이름 — 둘이 동시에 저장하다 부딪히지 않고 차례로 돈다
+  cancel-in-progress: false
 jobs:
   collect:
     runs-on: ubuntu-latest
@@ -22,4 +26,13 @@ jobs:
           git config user.name "news-bot"
           git config user.email "news-bot@users.noreply.github.com"
           git add us.json
-          git diff --cached --quiet || (git commit -m "us update" && git push)
+          git diff --cached --quiet && exit 0
+          git commit -m "us update"
+          for i in 1 2 3 4 5; do
+            if git push; then exit 0; fi
+            echo "push 거절 — 최신을 받아 다시 시도 ($i/5)"
+            git pull --rebase origin main || git rebase --abort 2>/dev/null
+            sleep $((i * 2))
+          done
+          echo "::error::5번 시도했지만 저장하지 못했습니다"
+          exit 1
