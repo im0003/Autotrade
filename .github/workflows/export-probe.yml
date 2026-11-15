@@ -1,1 +1,16 @@
-
+name: export-probe
+# 관세청 수출 통계 API 가 어떤 모양으로 응답하는지 한 번 확인합니다(조회만). Actions 탭에서 'Run workflow' 를 누르세요.
+on:
+  workflow_dispatch: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 응답 확인
+        env:
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+        run: node scripts/probe-export.mjs
