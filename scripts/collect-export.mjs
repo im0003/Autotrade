@@ -29,6 +29,7 @@ export function monthsBack(nowMs, n) {
   return out;
 }
 const q6 = (s) => s.replace(".", "");
+export const shiftYm = (ym, k) => { let y = +ym.slice(0, 4), m = +ym.slice(5) + k; while (m < 1) { m += 12; y--; } while (m > 12) { m -= 12; y++; } return ym.slice(0, 0) + `${y}.${String(m).padStart(2, "0")}`; };
 
 /** 응답 XML → 항목 배열 / 결과 코드 */
 export function parseItems(xml) {
@@ -50,8 +51,9 @@ async function call({ key, code, cnty, from, to, fetchImpl, tries = 3 }) {
       const p = parseItems(await r.text());
       if (p.code === "00") return p.items;
       if (/22|LIMIT/.test(p.code) || /한도|초과/.test(p.msg)) throw new LimitError(`호출 한도 초과 (${p.code} ${p.msg})`);
-      last = `${p.code} ${p.msg}`;
-    } catch (e) { if (e instanceof LimitError) throw e; last = e.message; }
+      last = `결과 ${p.code} ${p.msg}`;
+      if (p.code !== "00") { const e = new Error(last); e.noRetry = true; throw e; }
+    } catch (e) { if (e instanceof LimitError || e.noRetry) throw e; last = e.message; }
     await new Promise((r) => setTimeout(r, 800 * (t + 1)));
   }
   throw new Error(last || "조회 실패");
@@ -60,18 +62,21 @@ async function call({ key, code, cnty, from, to, fetchImpl, tries = 3 }) {
 /** 묶음별·월별 합계(달러) + 마지막 달 상위 3개국 */
 export async function collect({ key, nowMs = Date.now(), prev = null, full = false, only = null, fetchImpl = fetch, span = 15, conc = 10, log = console.log } = {}) {
   const groups = only?.length ? GROUPS.filter((g) => only.includes(g.key)) : GROUPS;   // only: 일부 묶음만 새로 받고 나머지는 저장된 값을 유지(여러 번에 나눠 돌릴 때)
-  const months = monthsBack(nowMs, span), to = months[0], from = months[months.length - 1];
-  if (!full && !only && prev?.latest && prev.latest >= to) { log(`새 달 없음 (저장된 최신 ${prev.latest}, 확인 대상 ${to})`); return null; }
-  if (!full && !only && prev?.latest) {   // 새 달이 올라왔는지 한 번만 확인
-    const probe = await call({ key, code: "34010101", cnty: "US", from: to, to, fetchImpl });
-    if (!probe.length) { log(`${to} 자료가 아직 없습니다`); return null; }
+  // 자료가 실제로 올라온 가장 최근 달을 찾는다(지난달이 아직 없을 수 있다). 올라오지 않은 달을 기간 끝으로 넣으면 조회가 전부 실패한다.
+  const cand = monthsBack(nowMs, 3); let to = "";
+  for (const m of cand) {
+    try { const probe = await call({ key, code: "34010101", cnty: "US", from: m, to: m, fetchImpl }); if (probe.length) { to = m; break; } }
+    catch (e) { if (e instanceof LimitError) throw e; log(`  ${m} 확인 실패: ${e.message}`); }
   }
+  if (!to) { log(`최근 3개월(${cand[cand.length - 1]} ~ ${cand[0]}) 중 올라온 자료를 못 찾았습니다`); return null; }
+  const from = shiftYm(to, -(span - 1));
+  if (!full && !only && prev?.latest && prev.latest >= to) { log(`새 달 없음 (저장된 최신 ${prev.latest}, 올라온 최신 ${to})`); return null; }
   const active = prev?.active || {};
   const jobs = [];
   for (const g of groups) for (const code of g.codes) { const list = !full && active[code]?.length ? active[code] : COUNTRIES; for (const c of list) jobs.push({ g, code, cnty: c }); }
   log(`조회 ${jobs.length}건 (${from} ~ ${to}) ${full || !prev ? "전체 국가" : "수출 있었던 국가만"}`);
   const sums = Object.fromEntries(GROUPS.map((g) => [g.key, {}])), tops = Object.fromEntries(GROUPS.map((g) => [g.key, {}])), act = {};
-  let i = 0, fail = 0, done = 0; const t0 = Date.now();
+  let i = 0, fail = 0, done = 0; const t0 = Date.now(), errs = new Map();
   const worker = async () => {
     while (i < jobs.length) {
       const j = jobs[i++];
@@ -81,11 +86,12 @@ export async function collect({ key, nowMs = Date.now(), prev = null, full = fal
           sums[j.g.key][it.ym] = (sums[j.g.key][it.ym] || 0) + it.usd;
           if (it.usd > 0) { (act[j.code] ||= new Set()).add(j.cnty); const t = (tops[j.g.key][it.ym] ||= {}); t[it.cntyKor || it.cnty] = (t[it.cntyKor || it.cnty] || 0) + it.usd; }
         }
-      } catch (e) { if (e instanceof LimitError) throw e; fail++; }
+      } catch (e) { if (e instanceof LimitError) throw e; fail++; const k = String(e.message).slice(0, 90); errs.set(k, (errs.get(k) || 0) + 1); }
       if (++done % 200 === 0) log(`  ${done}/${jobs.length} · ${Math.round((Date.now() - t0) / 1000)}초 · 실패 ${fail}`);
     }
   };
   await Promise.all(Array.from({ length: conc }, worker));
+  if (fail) log(`실패 ${fail}건 이유: ${[...errs].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([m, n]) => `${m} (${n}건)`).join(" / ")}`);
   if (fail > Math.max(5, jobs.length * 0.02)) throw new Error(`조회 실패가 너무 많습니다 (${fail}/${jobs.length}) — 저장하지 않습니다`);
   const fresh = (g) => groups.includes(g);
   const items = GROUPS.map((g) => {
