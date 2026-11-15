@@ -48,8 +48,9 @@ async function call({ key, code, cnty, from, to, fetchImpl, tries = 3 }) {
   for (let t = 0; t < tries; t++) {
     try {
       const r = await fetchImpl(`${BASE}?serviceKey=${key}&${q}`, { signal: AbortSignal.timeout(25000) });
-      const p = parseItems(await r.text());
+      const body = await r.text(), p = parseItems(body);
       if (p.code === "00") return p.items;
+      if (!p.code) { const e = new Error(`응답 형식 이상 (HTTP ${r.status}): ${String(body).replace(/\s+/g, " ").slice(0, 200)}`); e.noRetry = true; throw e; }
       if (/22|LIMIT/.test(p.code) || /한도|초과/.test(p.msg)) throw new LimitError(`호출 한도 초과 (${p.code} ${p.msg})`);
       last = `결과 ${p.code} ${p.msg}`;
       if (p.code !== "00") { const e = new Error(last); e.noRetry = true; throw e; }
