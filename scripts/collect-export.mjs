@@ -7,6 +7,8 @@ import fs from "node:fs";
 
 const BASE = "https://apis.data.go.kr/1220000/nnewtempertrade/getNnewtempertradeList";
 export const COUNTRIES = "AD AE AF AG AI AL AM AN AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CS CT CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET EU FI FJ FK FM FO FR FX GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP JT KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MI MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NQ NR NT NU NZ OM PA PE PF PG PH PK PL PM PN PO PR PS PT PW PY PZ QA RA RE RK RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TP TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WK WS YE YM YT YU Z1 ZA ZM ZR ZW ZZ".split(" ");
+/** 첫 실행에서 조회할 주요 수출 상대국(한국 수출의 대부분). 전체 국가는 ALL=1 로 받는다 */
+export const MAJOR = "CN US VN JP HK TW IN SG MX DE AU PL TR ID MY TH PH AE SA GB NL RU BR CA FR IT ES BE HU CZ SK EG IL KW QA CL CO PE AR ZA NG PK BD LT RO SE CH NO DK FI LV".split(" ");
 /** 묶음 이름 · 연결 테마(없으면 null) · 관세청 신성질 세세분류 코드. 코드표(성질통합분류코드)에서 골랐다 */
 export const GROUPS = [
   { key: "memory", name: "메모리반도체", themeId: "memory", codes: ["34010101"] },
@@ -42,12 +44,12 @@ export function parseItems(xml) {
 }
 
 export class LimitError extends Error {}
-async function call({ key, code, cnty, from, to, fetchImpl, tries = 5 }) {
+async function call({ key, code, cnty, from, to, fetchImpl, tries = 4 }) {
   const q = new URLSearchParams({ strtYymm: q6(from), endYymm: q6(to), imexTpcd: "1", imexTmprUnfcClsfCd: code, cntyCd: cnty });
   let last = "";
   for (let t = 0; t < tries; t++) {
     try {
-      const r = await fetchImpl(`${BASE}?serviceKey=${key}&${q}`, { signal: AbortSignal.timeout(25000) });
+      const r = await fetchImpl(`${BASE}?serviceKey=${key}&${q}`, { signal: AbortSignal.timeout(15000) });
       const body = await r.text(), p = parseItems(body);
       if (p.code === "00") return p.items;
       if (/22|LIMIT/.test(p.code) || /한도|초과/.test(p.msg)) throw new LimitError(`호출 한도 초과 (${p.code} ${p.msg})`);
@@ -62,7 +64,7 @@ async function call({ key, code, cnty, from, to, fetchImpl, tries = 5 }) {
 }
 
 /** 묶음별·월별 합계(달러) + 마지막 달 상위 3개국 */
-export async function collect({ key, nowMs = Date.now(), prev = null, full = false, only = null, fetchImpl = fetch, span = 12, conc = 3, log = console.log } = {}) {
+export async function collect({ key, nowMs = Date.now(), prev = null, full = false, only = null, fetchImpl = fetch, span = 12, conc = 3, log = console.log, onSave = null, all = false } = {}) {
   const groups = only?.length ? GROUPS.filter((g) => only.includes(g.key)) : GROUPS;   // only: 일부 묶음만 새로 받고 나머지는 저장된 값을 유지(여러 번에 나눠 돌릴 때)
   // 자료가 실제로 올라온 가장 최근 달을 찾는다(지난달이 아직 없을 수 있다). 올라오지 않은 달을 기간 끝으로 넣으면 조회가 전부 실패한다.
   const cand = monthsBack(nowMs, 3); let to = "";
@@ -74,41 +76,52 @@ export async function collect({ key, nowMs = Date.now(), prev = null, full = fal
   const from = shiftYm(to, -11), fromB = shiftYm(to, -14), toB = shiftYm(to, -12);   // 관세청은 한 번에 1년 이내만 가능 → 12개월 + 이전 3개월(작년 같은 달 비교용)
   if (!full && !only && prev?.latest && prev.latest >= to) { log(`새 달 없음 (저장된 최신 ${prev.latest}, 올라온 최신 ${to})`); return null; }
   const active = prev?.active || {};
-  const jobs = [];
-  for (const g of groups) for (const code of g.codes) { const list = !full && active[code]?.length ? active[code] : COUNTRIES; for (const c of list) jobs.push({ g, code, cnty: c }); }
-  log(`조회 ${jobs.length}건 (${fromB} ~ ${to}) ${full || !prev ? "전체 국가" : "수출 있었던 국가만"}`);
+  const nJobs = groups.reduce((n, g) => n + g.codes.reduce((m, code) => m + (!full && active[code]?.length ? active[code] : all ? COUNTRIES : MAJOR).length, 0), 0);
+  log(`조회 ${nJobs}건 (${fromB} ~ ${to}) ${all ? "전체 국가" : full || !prev ? `주요 ${MAJOR.length}개국` : "수출 있었던 국가만"} · 묶음 ${groups.length}개를 하나씩 받아 끝날 때마다 저장`);
   const sums = Object.fromEntries(GROUPS.map((g) => [g.key, {}])), tops = Object.fromEntries(GROUPS.map((g) => [g.key, {}])), act = {};
-  let i = 0, fail = 0, done = 0; const t0 = Date.now(), errs = new Map();
-  const worker = async () => {
-    while (i < jobs.length) {
-      const j = jobs[i++];
-      try {
-        let items = await call({ key, code: j.code, cnty: j.cnty, from, to, fetchImpl });
-        if (items.some((x) => x.usd > 0)) items = items.concat(await call({ key, code: j.code, cnty: j.cnty, from: fromB, to: toB, fetchImpl }));
-        for (const it of items) {
-          sums[j.g.key][it.ym] = (sums[j.g.key][it.ym] || 0) + it.usd;
-          if (it.usd > 0) { (act[j.code] ||= new Set()).add(j.cnty); const t = (tops[j.g.key][it.ym] ||= {}); t[it.cntyKor || it.cnty] = (t[it.cntyKor || it.cnty] || 0) + it.usd; }
-        }
-      } catch (e) { if (e instanceof LimitError) throw e; fail++; const k = String(e.message).slice(0, 90); errs.set(k, (errs.get(k) || 0) + 1); }
-      if (++done % 200 === 0) log(`  ${done}/${jobs.length} · ${Math.round((Date.now() - t0) / 1000)}초 · 실패 ${fail}`);
-    }
+  const doneG = new Set(); let done = 0, fail = 0, streak = 0; const t0 = Date.now(), errs = new Map();
+  const build = () => {
+    const items = GROUPS.map((g) => {
+      if (!doneG.has(g.key)) return prev?.items?.find((x) => x.key === g.key) || null;
+      const s = sums[g.key], mths = Object.keys(s).sort();
+      const last = mths[mths.length - 1], top = last ? Object.entries(tops[g.key][last] || {}).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([n, v]) => ({ n, usd: Math.round(v) })) : [];
+      return { key: g.key, name: g.name, themeId: g.themeId, codes: g.codes, months: Object.fromEntries(mths.map((m) => [m, Math.round(s[m])])), top };
+    }).filter(Boolean);
+    const all = [...new Set(items.flatMap((x) => Object.keys(x.months)))].sort();
+    const latest = all.filter((m) => items.some((x) => x.months[m] > 0)).pop() || "";
+    const newAct = Object.fromEntries(Object.entries(act).map(([c, s]) => [c, [...s].sort()]));
+    const nextActive = full || !prev?.active || only ? { ...(prev?.active || {}), ...newAct } : prev.active;   // 다음 달 이후에는 수출이 있었던 국가만 조회
+    return { updated: new Date(nowMs).toISOString(), latest, unit: "USD", source: "관세청 신성질별 국가별 수출입실적(수출, 달러)", items, active: nextActive };
   };
-  await Promise.all(Array.from({ length: conc }, worker));
-  if (fail) log(`실패 ${fail}건 이유: ${[...errs].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([m, n]) => `${m} (${n}건)`).join(" / ")}`);
-  if (fail > Math.max(5, jobs.length * 0.02)) throw new Error(`조회 실패가 너무 많습니다 (${fail}/${jobs.length}) — 저장하지 않습니다`);
-  const fresh = (g) => groups.includes(g);
-  const items = GROUPS.map((g) => {
-    if (!fresh(g)) return prev?.items?.find((x) => x.key === g.key) || null;
-    const s = sums[g.key], mths = Object.keys(s).sort();
-    const last = mths[mths.length - 1], top = last ? Object.entries(tops[g.key][last] || {}).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n, v]) => ({ n, usd: Math.round(v) })) : [];
-    return { key: g.key, name: g.name, themeId: g.themeId, codes: g.codes, months: Object.fromEntries(mths.map((m) => [m, Math.round(s[m])])), top };
-  }).filter(Boolean);
-  const all = [...new Set(items.flatMap((x) => Object.keys(x.months)))].sort();
-  const latest = all.filter((m) => items.some((x) => x.months[m] > 0)).pop() || "";
-  // 다음 달 이후에는 수출이 있었던 국가만 조회한다 (이번에 전체를 돌렸을 때만 갱신)
-  const newAct = Object.fromEntries(Object.entries(act).map(([c, s]) => [c, [...s].sort()]));
-  const nextActive = full || !prev?.active || only ? { ...(prev?.active || {}), ...newAct } : prev.active;
-  return { updated: new Date(nowMs).toISOString(), latest, unit: "USD", source: "관세청 신성질별 국가별 수출입실적(수출, 달러)", items, active: nextActive };
+  let result = null;
+  for (const g of groups) {
+    const jobs = [];
+    for (const code of g.codes) { const list = !full && active[code]?.length ? active[code] : all ? COUNTRIES : MAJOR; for (const c of list) jobs.push({ code, cnty: c }); }
+    let i = 0, gFail = 0;
+    const worker = async () => {
+      while (i < jobs.length && streak < 15) {
+        const j = jobs[i++];
+        try {
+          let items = await call({ key, code: j.code, cnty: j.cnty, from, to, fetchImpl });
+          if (items.some((x) => x.usd > 0)) items = items.concat(await call({ key, code: j.code, cnty: j.cnty, from: fromB, to: toB, fetchImpl }));
+          streak = 0;
+          for (const it of items) {
+            sums[g.key][it.ym] = (sums[g.key][it.ym] || 0) + it.usd;
+            if (it.usd > 0) { (act[j.code] ||= new Set()).add(j.cnty); const t = (tops[g.key][it.ym] ||= {}); t[it.cntyKor || it.cnty] = (t[it.cntyKor || it.cnty] || 0) + it.usd; }
+          }
+        } catch (e) { if (e instanceof LimitError) throw e; fail++; gFail++; streak++; const k = String(e.message).slice(0, 90); errs.set(k, (errs.get(k) || 0) + 1); }
+        if (++done % 200 === 0) log(`  ${done}/${nJobs} · ${Math.round((Date.now() - t0) / 1000)}초 · 실패 ${fail}`);
+      }
+    };
+    await Promise.all(Array.from({ length: conc }, worker));
+    const why = () => [...errs].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([m, n]) => `${m} (${n}건)`).join(" / ");
+    if (streak >= 15) throw Object.assign(new Error(`연속 실패 ${streak}건 — 서버가 응답하지 않거나 하루 호출 한도일 수 있어 멈춥니다 (${why()}). 앞 묶음은 저장했습니다`), { partial: result });
+    if (gFail > Math.max(5, jobs.length * 0.02)) throw Object.assign(new Error(`${g.name} 조회 실패가 너무 많습니다 (${gFail}/${jobs.length}: ${why()}) — 이 묶음은 저장하지 않습니다`), { partial: result });
+    doneG.add(g.key); result = build();
+    log(`  [${g.name}] 완료 · 지금까지 ${doneG.size}/${groups.length}개 묶음`);
+    if (onSave) onSave(result);
+  }
+  return result;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -119,9 +132,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const mask = (s) => String(s).split(key0).join("***");
   try {
     const only = (process.env.ONLY || "").split(",").map((x) => x.trim()).filter(Boolean);
-    const r = await collect({ key, prev, full: process.env.FULL === "1" || !prev || only.length > 0, only, log: (s) => console.log(mask(s)) });
+    const r = await collect({ key, prev, full: process.env.FULL === "1" || !prev || only.length > 0, only, all: process.env.ALL === "1", log: (s) => console.log(mask(s)), onSave: (x) => fs.writeFileSync(out, JSON.stringify(x)) });
     if (!r) process.exit(0);
     fs.writeFileSync(out, JSON.stringify(r));
     console.log(`저장 ${out} · 최신 ${r.latest} · ${r.items.map((x) => `${x.name} ${Math.round((x.months[r.latest] || 0) / 1e6)}백만$`).join(" / ")}`);
-  } catch (e) { console.log("실패:", mask(e.message)); process.exit(1); }
+  } catch (e) { console.log("실패:", mask(e.message)); process.exit(e.partial ? 0 : 1); }
 }
