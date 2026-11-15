@@ -1,43 +1,26 @@
-// 코스피200 야간선물 종가를 GitHub Actions 에서 읽을 수 있는지 시험 조회 (조회만 합니다, 아무것도 저장하지 않음)
-//  - 각 후보 주소에 접속해 상태코드·응답 앞부분·'야간' 글자/숫자 유무를 보여 준다.
-//  - 환경변수 EXTRA="주소1,주소2" 로 주소를 더 시험할 수 있다.
+// 야간선물 종가를 읽을 수 있는 주소 찾기 (조회만 합니다, 저장 없음)
+//  2차 결과: 네이버는 주간 선물만 있고 야간은 없음(409), KRX 는 로그인 필요, apt2.me 는 차단.
+//  3차: esignal·stockhub·다음금융 페이지 안에서 실제로 데이터를 불러오는 주소(api/ajax/json)를 찾아 보여 준다.
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
-const ymd = (d) => d.toISOString().slice(0, 10).replace(/-/g, "");
-const kst = new Date(Date.now() + 9 * 3600e3);
-const day = ymd(kst);
-const full = [
-  ["네이버 모바일 FUT basic (전체)", "GET", "https://m.stock.naver.com/api/index/FUT/basic", null, true],
-  ["네이버 모바일 FUT integration (전체)", "GET", "https://m.stock.naver.com/api/index/FUT/integration", null, true],
-  ["네이버 모바일 FUT price (일별 3건)", "GET", "https://m.stock.naver.com/api/index/FUT/price?pageSize=3&page=1", null, true],
-  ["네이버 폴링 FUT", "GET", "https://polling.finance.naver.com/api/realtime/domestic/index/FUT", null, true],
-  ["네이버 모바일 야간 후보 FUT_NIGHT", "GET", "https://m.stock.naver.com/api/index/FUT_NIGHT/basic", null, true],
-  ["네이버 모바일 야간 후보 NFUT", "GET", "https://m.stock.naver.com/api/index/NFUT/basic", null, true],
+const pages = [
+  "https://esignal.co.kr/",
+  "https://esignal.co.kr/kospi200-night-futures/",
+  "https://stockhub.kr/markets/kospi-futures",
+  "https://finance.daum.net/domestic/futures",
+  "https://finance.daum.net/",
+  ...String(process.env.EXTRA || "").split(",").map((u) => u.trim()).filter(Boolean),
 ];
-const targets = [
-  ...full,
-  ["KRX 정보데이터 파생 전종목시세(야간 시도)", "POST", "http://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd", { bld: "dbms/MDC/STAT/standard/MDCSTAT12501", trdDd: day, prodId: "KRDRVFUK2I", mktTpCd: "N", share: "1", money: "1", csvxls_isNo: "false" }],
-  ["KRX 정보데이터 파생 전종목시세(주간 대조)", "POST", "http://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd", { bld: "dbms/MDC/STAT/standard/MDCSTAT12501", trdDd: day, prodId: "KRDRVFUK2I", share: "1", money: "1", csvxls_isNo: "false" }],
-  ["apt2.me", "GET", "https://apt2.me/", null],
-  ["esignal 야간선물", "GET", "https://esignal.co.kr/", null],
-  ["stockhub 야간선물", "GET", "https://stockhub.kr/markets/kospi-futures", null],
-  ["네이버 금융 선물", "GET", "https://finance.naver.com/sise/sise_index.naver?code=FUT", null],
-  ["네이버 모바일 지수 API(FUT)", "GET", "https://m.stock.naver.com/api/index/FUT/basic", null],
-  ...String(process.env.EXTRA || "").split(",").map((u) => u.trim()).filter(Boolean).map((u) => ["추가 " + u, "GET", u, null]),
-];
+const get = async (url, headers = {}) => { const r = await fetch(url, { headers: { "user-agent": UA, accept: "text/html,application/json", ...headers }, signal: AbortSignal.timeout(20000), redirect: "follow" }); return { r, body: await r.text() }; };
 const clean = (t) => String(t).replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<style[\s\S]*?<\/style>/g, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-console.log(`한국 날짜 ${day} · 지금 ${kst.toISOString().slice(11, 16)} (KST)`);
-for (const [name, method, url, form, dump] of targets) {
+console.log(`지금 ${new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16)} (KST)`);
+for (const url of pages) {
   try {
-    const t0 = Date.now();
-    const r = await fetch(url, { method, headers: { "user-agent": UA, ...(form ? { "content-type": "application/x-www-form-urlencoded; charset=UTF-8", referer: "http://data.krx.co.kr/", accept: "application/json, text/javascript, */*" } : { accept: "text/html,application/json" }) }, body: form ? new URLSearchParams(form).toString() : undefined, signal: AbortSignal.timeout(20000), redirect: "follow" });
-    const body = await r.text();
-    const txt = clean(body);
-    const night = (txt.match(/야간[^.]{0,40}/g) || []).slice(0, 3);
-    const nums = (txt.match(/\d{3}\.\d{2}/g) || []).slice(0, 6);
-    console.log(`\n■ ${name}\n  HTTP ${r.status} · ${r.headers.get("content-type") || ""} · ${body.length}자 · ${Date.now() - t0}ms`);
-    console.log(`  앞부분: ${txt.slice(0, 260)}`);
-    if (dump) console.log(`  전체(최대 3500자): ${body.slice(0, 3500)}`);
-    if (night.length) console.log(`  '야간' 포함: ${night.join(" | ")}`);
-    if (nums.length) console.log(`  200대~500대 소수 두 자리 숫자 예: ${nums.join(", ")}`);
-  } catch (e) { console.log(`\n■ ${name}\n  실패: ${String(e.message).slice(0, 120)}`); }
+    const { r, body } = await get(url);
+    console.log(`\n■ ${url}\n  HTTP ${r.status} · ${body.length}자`);
+    const found = new Set();
+    for (const m of body.matchAll(/["'(]((?:https?:)?\/\/[^"'()\s<>]+|\/[A-Za-z0-9_\-./]*(?:api|ajax|json|data|futures|night|quote)[A-Za-z0-9_\-./?=&%]*)["')]/gi)) { const u = m[1]; if (/(api|ajax|json|data|future|night|quote|price)/i.test(u) && !/\.(png|jpg|svg|css|woff2?|ico|gif)(\?|$)/i.test(u) && !/google|facebook|doubleclick|gstatic|cloudflare|jquery|cdn/i.test(u)) found.add(u.slice(0, 160)); if (found.size >= 40) break; }
+    console.log(`  데이터 주소 후보 ${found.size}개:`); [...found].forEach((u) => console.log(`   - ${u}`));
+    const tx = clean(body), i = tx.indexOf("야간");
+    if (i >= 0) console.log(`  '야간' 주변: ${tx.slice(Math.max(0, i - 40), i + 200)}`);
+  } catch (e) { console.log(`\n■ ${url}\n  실패: ${String(e.message).slice(0, 120)}`); }
 }
