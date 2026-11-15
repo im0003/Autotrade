@@ -42,7 +42,7 @@ export function parseItems(xml) {
 }
 
 export class LimitError extends Error {}
-async function call({ key, code, cnty, from, to, fetchImpl, tries = 3 }) {
+async function call({ key, code, cnty, from, to, fetchImpl, tries = 5 }) {
   const q = new URLSearchParams({ strtYymm: q6(from), endYymm: q6(to), imexTpcd: "1", imexTmprUnfcClsfCd: code, cntyCd: cnty });
   let last = "";
   for (let t = 0; t < tries; t++) {
@@ -50,10 +50,11 @@ async function call({ key, code, cnty, from, to, fetchImpl, tries = 3 }) {
       const r = await fetchImpl(`${BASE}?serviceKey=${key}&${q}`, { signal: AbortSignal.timeout(25000) });
       const body = await r.text(), p = parseItems(body);
       if (p.code === "00") return p.items;
-      if (!p.code) { const e = new Error(`응답 형식 이상 (HTTP ${r.status}): ${String(body).replace(/\s+/g, " ").slice(0, 200)}`); e.noRetry = true; throw e; }
       if (/22|LIMIT/.test(p.code) || /한도|초과/.test(p.msg)) throw new LimitError(`호출 한도 초과 (${p.code} ${p.msg})`);
+      if (r.status === 429 || (!p.code && /Too Many|429/i.test(body))) { last = "요청이 너무 잦음 (HTTP 429)"; await new Promise((z) => setTimeout(z, 3000 * (t + 1))); continue; }   // 잠깐 쉬고 다시
       last = `결과 ${p.code} ${p.msg}`;
-      if (p.code !== "00") { const e = new Error(last); e.noRetry = true; throw e; }
+      if (!p.code) last = `응답 형식 이상 (HTTP ${r.status}): ${String(body).replace(/\s+/g, " ").slice(0, 200)}`;
+      const e = new Error(last); e.noRetry = true; throw e;
     } catch (e) { if (e instanceof LimitError || e.noRetry) throw e; last = e.message; }
     await new Promise((r) => setTimeout(r, 800 * (t + 1)));
   }
@@ -61,7 +62,7 @@ async function call({ key, code, cnty, from, to, fetchImpl, tries = 3 }) {
 }
 
 /** 묶음별·월별 합계(달러) + 마지막 달 상위 3개국 */
-export async function collect({ key, nowMs = Date.now(), prev = null, full = false, only = null, fetchImpl = fetch, span = 15, conc = 10, log = console.log } = {}) {
+export async function collect({ key, nowMs = Date.now(), prev = null, full = false, only = null, fetchImpl = fetch, span = 12, conc = 3, log = console.log } = {}) {
   const groups = only?.length ? GROUPS.filter((g) => only.includes(g.key)) : GROUPS;   // only: 일부 묶음만 새로 받고 나머지는 저장된 값을 유지(여러 번에 나눠 돌릴 때)
   // 자료가 실제로 올라온 가장 최근 달을 찾는다(지난달이 아직 없을 수 있다). 올라오지 않은 달을 기간 끝으로 넣으면 조회가 전부 실패한다.
   const cand = monthsBack(nowMs, 3); let to = "";
@@ -70,19 +71,20 @@ export async function collect({ key, nowMs = Date.now(), prev = null, full = fal
     catch (e) { if (e instanceof LimitError) throw e; log(`  ${m} 확인 실패: ${e.message}`); }
   }
   if (!to) { log(`최근 3개월(${cand[cand.length - 1]} ~ ${cand[0]}) 중 올라온 자료를 못 찾았습니다`); return null; }
-  const from = shiftYm(to, -(span - 1));
+  const from = shiftYm(to, -11), fromB = shiftYm(to, -14), toB = shiftYm(to, -12);   // 관세청은 한 번에 1년 이내만 가능 → 12개월 + 이전 3개월(작년 같은 달 비교용)
   if (!full && !only && prev?.latest && prev.latest >= to) { log(`새 달 없음 (저장된 최신 ${prev.latest}, 올라온 최신 ${to})`); return null; }
   const active = prev?.active || {};
   const jobs = [];
   for (const g of groups) for (const code of g.codes) { const list = !full && active[code]?.length ? active[code] : COUNTRIES; for (const c of list) jobs.push({ g, code, cnty: c }); }
-  log(`조회 ${jobs.length}건 (${from} ~ ${to}) ${full || !prev ? "전체 국가" : "수출 있었던 국가만"}`);
+  log(`조회 ${jobs.length}건 (${fromB} ~ ${to}) ${full || !prev ? "전체 국가" : "수출 있었던 국가만"}`);
   const sums = Object.fromEntries(GROUPS.map((g) => [g.key, {}])), tops = Object.fromEntries(GROUPS.map((g) => [g.key, {}])), act = {};
   let i = 0, fail = 0, done = 0; const t0 = Date.now(), errs = new Map();
   const worker = async () => {
     while (i < jobs.length) {
       const j = jobs[i++];
       try {
-        const items = await call({ key, code: j.code, cnty: j.cnty, from, to, fetchImpl });
+        let items = await call({ key, code: j.code, cnty: j.cnty, from, to, fetchImpl });
+        if (items.some((x) => x.usd > 0)) items = items.concat(await call({ key, code: j.code, cnty: j.cnty, from: fromB, to: toB, fetchImpl }));
         for (const it of items) {
           sums[j.g.key][it.ym] = (sums[j.g.key][it.ym] || 0) + it.usd;
           if (it.usd > 0) { (act[j.code] ||= new Set()).add(j.cnty); const t = (tops[j.g.key][it.ym] ||= {}); t[it.cntyKor || it.cnty] = (t[it.cntyKor || it.cnty] || 0) + it.usd; }
