@@ -1,0 +1,21 @@
+name: probe-night
+on:
+  workflow_dispatch:
+    inputs:
+      extra:
+        description: "extra urls, comma separated (optional)"
+        required: false
+        default: ""
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: probe
+        env:
+          EXTRA: ${{ github.event.inputs.extra }}
+        run: node scripts/probe-night.mjs
