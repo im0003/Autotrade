@@ -131,9 +131,9 @@ export async function getNews(sym, nowMs, f = fetch) {
 export const pickMovers = (got, skip = new Set()) => Object.entries(got).filter(([s, g]) => !s.startsWith("^") && !skip.has(s) && Math.abs(g.chg) >= MOVER_PCT).sort((a, b) => Math.abs(b[1].chg) - Math.abs(a[1].chg)).slice(0, MOVER_MAX).map(([s]) => s);
 /** 해외 거래소(하이퍼리퀴드)의 KOSPI200 24시간 상품 — 한국장 마감(평일 15:30 KST) 대비 지금까지의 변화. 진짜 야간선물이 아니라 대용 지표.
  *  실패하면 null (화면에서는 '—') */
-export async function getKr200(fetchImpl = fetch, nowMs = Date.now()) {
+export async function getKr200(fetchImpl = fetch, nowMs = Date.now(), coin = "xyz:KR200") {
   try {
-    const r = await fetchImpl("https://api.hyperliquid.xyz/info", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "candleSnapshot", req: { coin: "xyz:KR200", interval: "5m", startTime: nowMs - 5 * 86400000, endTime: nowMs } }), signal: AbortSignal.timeout(20000) });
+    const r = await fetchImpl("https://api.hyperliquid.xyz/info", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "candleSnapshot", req: { coin, interval: "5m", startTime: nowMs - 5 * 86400000, endTime: nowMs } }), signal: AbortSignal.timeout(20000) });
     if (!r.ok) return null;
     const rows = await r.json();
     if (!Array.isArray(rows) || rows.length < 10) return null;
@@ -141,7 +141,7 @@ export async function getKr200(fetchImpl = fetch, nowMs = Date.now()) {
     for (const k of rows) { const d = new Date(k.t + 9 * 3600e3); const wd = d.getUTCDay(); if (wd >= 1 && wd <= 5 && d.getUTCHours() === 15 && d.getUTCMinutes() === 25 && k.t < nowMs) ref = { px: +k.c, t: k.t }; }
     const last = rows[rows.length - 1], px = +last.c;
     if (!ref || !(px > 0) || !(ref.px > 0)) return null;
-    return { sym: "xyz:KR200", price: px, ref: ref.px, refAt: ref.t, asOf: last.t, chg: +((px / ref.px - 1) * 100).toFixed(2) };
+    return { sym: coin, price: px, ref: ref.px, refAt: ref.t, asOf: last.t, chg: +((px / ref.px - 1) * 100).toFixed(2) };
   } catch { return null; }
 }
 export async function collectUs({ fetchImpl = fetch, nowMs = Date.now(), themes = US_THEMES, index = US_INDEX, krIndex = KR_INDEX, sectors = US_SECTORS } = {}) {
@@ -160,13 +160,16 @@ export async function collectUs({ fetchImpl = fetch, nowMs = Date.now(), themes 
   const krIdx = {}, krFail = {};
   for (const [sym, name] of krIndex) { const k = await getKrIdx(sym, fetchImpl); if (k.rows.length) krIdx[name] = k.rows; else krFail[name] = k.err; }
   const night = await getKr200(fetchImpl, nowMs);
-  return { at: nowMs, market, ...(night ? { night } : {}), news, ...(Object.keys(newsFail).length ? { newsFail } : {}), movers, krIdx, ...(Object.keys(krFail).length ? { krFail } : {}), session: dates.at(-1) || "", indices: index.map(([s, n]) => (got[s] ? { sym: s, name: n, chg: got[s].chg } : null)).filter(Boolean), themes: th, failed: Object.keys(fail).length, failDetail: fail, ok: Object.keys(got).length, total: syms.length, sectors: secOut, ...(secFail.length ? { sectorsFail: secFail } : {}) };
+  const nightStocks = {};   // 삼성전자·SK하이닉스 해외 무기한선물(대용 지표). 못 받으면 빠진다
+  for (const [k, coin] of [["삼성전자", "xyz:SMSN"], ["SK하이닉스", "xyz:SKHX"]]) { const v = await getKr200(fetchImpl, nowMs, coin); if (v) nightStocks[k] = { chg: v.chg, price: v.price }; }
+  return { at: nowMs, market, ...(night ? { night } : {}), ...(Object.keys(nightStocks).length ? { nightStocks } : {}), news, ...(Object.keys(newsFail).length ? { newsFail } : {}), movers, krIdx, ...(Object.keys(krFail).length ? { krFail } : {}), session: dates.at(-1) || "", indices: index.map(([s, n]) => (got[s] ? { sym: s, name: n, chg: got[s].chg } : null)).filter(Boolean), themes: th, failed: Object.keys(fail).length, failDetail: fail, ok: Object.keys(got).length, total: syms.length, sectors: secOut, ...(secFail.length ? { sectorsFail: secFail } : {}) };
 }
 /** 새로 받은 결과 r 을 이전 파일 prev 와 합친다. 미국 종목을 하나도 못 받았으면 이전 미국 요약을 그대로 두고(stale 표시), 지수 일봉은 새로 받은 것만 덮어쓴다.
  *  반환 {out, usable}: usable=false 면 새로 얻은 것도, 이전에 있던 것도 없다 → 실패 처리 */
 export function mergeWithPrev(r, prev) {
   if (!(r.sectors?.length) && Array.isArray(prev?.sectors) && prev.sectors.length) r = { ...r, sectors: prev.sectors };   // 업종을 못 받으면 이전 값 유지
   if (!r.night && prev?.night) r = { ...r, night: prev.night, nightStale: true };
+  if (!r.nightStocks && prev?.nightStocks) r = { ...r, nightStocks: prev.nightStocks, nightStale: true };
   const hasUs = r.ok > 0, hasKr = Object.keys(r.krIdx || {}).length > 0;
   if (hasUs && hasKr) return { out: r, usable: true, note: "" };
   const p = prev && typeof prev === "object" ? prev : {};
@@ -183,6 +186,7 @@ if (process.argv[1] && process.argv[1].endsWith("collect-us.mjs")) {
     console.log(`OK ${r.ok}/${r.total} 종목 · 기준일 ${r.session} · 상위 테마: ${r.themes.slice(0, 3).map((t) => `${t.name} ${t.avg}%`).join(", ")}`);
     console.log(`국내 지수 일봉: ${Object.entries(r.krIdx).map(([k, v]) => `${k} ${v.length}일(마지막 ${v[v.length - 1][0]})`).join(", ") || "없음"}${r.krFail ? ` · 실패 ${JSON.stringify(r.krFail)}` : ""}`);
     console.log(`큰 움직임(±${MOVER_PCT}%) ${r.movers.length}종목 중 기사 ${Object.keys(r.news).length}종목 받음${r.newsFail ? ` · 실패 예) ${Object.entries(r.newsFail).slice(0, 3).map(([k, v]) => `${k}: ${v.join(" / ")}`).join(" | ")}` : ""}`);
+    console.log(`삼성/하이닉스 선물형: ${Object.entries(r.nightStocks || {}).map(([k, v]) => `${k} ${v.chg}%`).join(", ") || "못 받음"}`);
     console.log(r.night ? `KOSPI200 24h(해외) ${r.night.price} · 마감 대비 ${r.night.chg}%` : "KOSPI200 24h(해외) 못 받음");
     console.log(`업종·산업 ETF ${r.sectors.length}/${US_SECTORS.length}개 받음${r.sectors.length ? ` · 가장 센 곳: ${r.sectors.slice(0, 3).map((x) => `${x.name} ${x.chg}%`).join(", ")}` : ""}${r.sectorsFail ? ` · 실패 ${r.sectorsFail.join(",")}` : ""}`);
     if (r.failed) { const ex = Object.entries(r.failDetail).slice(0, 5).map(([k, v]) => `${k}: ${v.join(" / ")}`); console.log(`실패 ${r.failed}개 — 예) ${ex.join(" | ")}`); }
