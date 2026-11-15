@@ -5,7 +5,16 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const ymd = (d) => d.toISOString().slice(0, 10).replace(/-/g, "");
 const kst = new Date(Date.now() + 9 * 3600e3);
 const day = ymd(kst);
+const full = [
+  ["네이버 모바일 FUT basic (전체)", "GET", "https://m.stock.naver.com/api/index/FUT/basic", null, true],
+  ["네이버 모바일 FUT integration (전체)", "GET", "https://m.stock.naver.com/api/index/FUT/integration", null, true],
+  ["네이버 모바일 FUT price (일별 3건)", "GET", "https://m.stock.naver.com/api/index/FUT/price?pageSize=3&page=1", null, true],
+  ["네이버 폴링 FUT", "GET", "https://polling.finance.naver.com/api/realtime/domestic/index/FUT", null, true],
+  ["네이버 모바일 야간 후보 FUT_NIGHT", "GET", "https://m.stock.naver.com/api/index/FUT_NIGHT/basic", null, true],
+  ["네이버 모바일 야간 후보 NFUT", "GET", "https://m.stock.naver.com/api/index/NFUT/basic", null, true],
+];
 const targets = [
+  ...full,
   ["KRX 정보데이터 파생 전종목시세(야간 시도)", "POST", "http://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd", { bld: "dbms/MDC/STAT/standard/MDCSTAT12501", trdDd: day, prodId: "KRDRVFUK2I", mktTpCd: "N", share: "1", money: "1", csvxls_isNo: "false" }],
   ["KRX 정보데이터 파생 전종목시세(주간 대조)", "POST", "http://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd", { bld: "dbms/MDC/STAT/standard/MDCSTAT12501", trdDd: day, prodId: "KRDRVFUK2I", share: "1", money: "1", csvxls_isNo: "false" }],
   ["apt2.me", "GET", "https://apt2.me/", null],
@@ -17,7 +26,7 @@ const targets = [
 ];
 const clean = (t) => String(t).replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<style[\s\S]*?<\/style>/g, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 console.log(`한국 날짜 ${day} · 지금 ${kst.toISOString().slice(11, 16)} (KST)`);
-for (const [name, method, url, form] of targets) {
+for (const [name, method, url, form, dump] of targets) {
   try {
     const t0 = Date.now();
     const r = await fetch(url, { method, headers: { "user-agent": UA, ...(form ? { "content-type": "application/x-www-form-urlencoded; charset=UTF-8", referer: "http://data.krx.co.kr/", accept: "application/json, text/javascript, */*" } : { accept: "text/html,application/json" }) }, body: form ? new URLSearchParams(form).toString() : undefined, signal: AbortSignal.timeout(20000), redirect: "follow" });
@@ -27,6 +36,7 @@ for (const [name, method, url, form] of targets) {
     const nums = (txt.match(/\d{3}\.\d{2}/g) || []).slice(0, 6);
     console.log(`\n■ ${name}\n  HTTP ${r.status} · ${r.headers.get("content-type") || ""} · ${body.length}자 · ${Date.now() - t0}ms`);
     console.log(`  앞부분: ${txt.slice(0, 260)}`);
+    if (dump) console.log(`  전체(최대 3500자): ${body.slice(0, 3500)}`);
     if (night.length) console.log(`  '야간' 포함: ${night.join(" | ")}`);
     if (nums.length) console.log(`  200대~500대 소수 두 자리 숫자 예: ${nums.join(", ")}`);
   } catch (e) { console.log(`\n■ ${name}\n  실패: ${String(e.message).slice(0, 120)}`); }
