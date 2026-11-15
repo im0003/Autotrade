@@ -8,6 +8,10 @@ on:
         description: "1 = all countries again"
         required: false
         default: ""
+      only:
+        description: "groups to refresh, comma separated (memory,sysemi,semieq,display,battery,ship,shipeng,oil,car). empty = all"
+        required: false
+        default: ""
 permissions:
   contents: write
 concurrency:
@@ -16,7 +20,7 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 110
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,6 +30,7 @@ jobs:
         env:
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
           FULL: ${{ github.event.inputs.full }}
+          ONLY: ${{ github.event.inputs.only }}
         run: node scripts/collect-export.mjs export.json
       - name: save
         run: |
