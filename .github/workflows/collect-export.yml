@@ -1,0 +1,35 @@
+name: collect-export
+on:
+  schedule:
+    - cron: "30 22 * * *"
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "1 = all countries again"
+        required: false
+        default: ""
+permissions:
+  contents: write
+concurrency:
+  group: collect-export
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: collect
+        env:
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+          FULL: ${{ github.event.inputs.full }}
+        run: node scripts/collect-export.mjs export.json
+      - name: save
+        run: |
+          git config user.name "export-bot"
+          git config user.email "export-bot@users.noreply.github.com"
+          git add export.json
+          git diff --cached --quiet || (git commit -m "export update" && git push)
