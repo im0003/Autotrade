@@ -8,6 +8,10 @@ on:
         description: "1 = all countries again"
         required: false
         default: ""
+      all:
+        description: "1 = every country (uses many calls)"
+        required: false
+        default: ""
       only:
         description: "groups to refresh, comma separated (memory,sysemi,semieq,display,battery,ship,shipeng,oil,car). empty = all"
         required: false
@@ -31,8 +35,10 @@ jobs:
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
           FULL: ${{ github.event.inputs.full }}
           ONLY: ${{ github.event.inputs.only }}
+          ALL: ${{ github.event.inputs.all }}
         run: node scripts/collect-export.mjs export.json
       - name: save
+        if: always()
         run: |
           git config user.name "export-bot"
           git config user.email "export-bot@users.noreply.github.com"
