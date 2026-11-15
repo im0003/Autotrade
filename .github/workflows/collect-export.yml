@@ -36,5 +36,6 @@ jobs:
         run: |
           git config user.name "export-bot"
           git config user.email "export-bot@users.noreply.github.com"
+          [ -f export.json ] || { echo "export.json 없음 - 저장할 것 없음"; exit 0; }
           git add export.json
           git diff --cached --quiet || (git commit -m "export update" && git push)
