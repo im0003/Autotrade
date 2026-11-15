@@ -58,19 +58,20 @@ async function call({ key, code, cnty, from, to, fetchImpl, tries = 3 }) {
 }
 
 /** 묶음별·월별 합계(달러) + 마지막 달 상위 3개국 */
-export async function collect({ key, nowMs = Date.now(), prev = null, full = false, fetchImpl = fetch, span = 15, conc = 6, log = console.log } = {}) {
+export async function collect({ key, nowMs = Date.now(), prev = null, full = false, only = null, fetchImpl = fetch, span = 15, conc = 10, log = console.log } = {}) {
+  const groups = only?.length ? GROUPS.filter((g) => only.includes(g.key)) : GROUPS;   // only: 일부 묶음만 새로 받고 나머지는 저장된 값을 유지(여러 번에 나눠 돌릴 때)
   const months = monthsBack(nowMs, span), to = months[0], from = months[months.length - 1];
-  if (!full && prev?.latest && prev.latest >= to) { log(`새 달 없음 (저장된 최신 ${prev.latest}, 확인 대상 ${to})`); return null; }
-  if (!full && prev?.latest) {   // 새 달이 올라왔는지 한 번만 확인
+  if (!full && !only && prev?.latest && prev.latest >= to) { log(`새 달 없음 (저장된 최신 ${prev.latest}, 확인 대상 ${to})`); return null; }
+  if (!full && !only && prev?.latest) {   // 새 달이 올라왔는지 한 번만 확인
     const probe = await call({ key, code: "34010101", cnty: "US", from: to, to, fetchImpl });
     if (!probe.length) { log(`${to} 자료가 아직 없습니다`); return null; }
   }
   const active = prev?.active || {};
   const jobs = [];
-  for (const g of GROUPS) for (const code of g.codes) { const list = !full && active[code]?.length ? active[code] : COUNTRIES; for (const c of list) jobs.push({ g, code, cnty: c }); }
+  for (const g of groups) for (const code of g.codes) { const list = !full && active[code]?.length ? active[code] : COUNTRIES; for (const c of list) jobs.push({ g, code, cnty: c }); }
   log(`조회 ${jobs.length}건 (${from} ~ ${to}) ${full || !prev ? "전체 국가" : "수출 있었던 국가만"}`);
   const sums = Object.fromEntries(GROUPS.map((g) => [g.key, {}])), tops = Object.fromEntries(GROUPS.map((g) => [g.key, {}])), act = {};
-  let i = 0, fail = 0, done = 0;
+  let i = 0, fail = 0, done = 0; const t0 = Date.now();
   const worker = async () => {
     while (i < jobs.length) {
       const j = jobs[i++];
@@ -81,20 +82,23 @@ export async function collect({ key, nowMs = Date.now(), prev = null, full = fal
           if (it.usd > 0) { (act[j.code] ||= new Set()).add(j.cnty); const t = (tops[j.g.key][it.ym] ||= {}); t[it.cntyKor || it.cnty] = (t[it.cntyKor || it.cnty] || 0) + it.usd; }
         }
       } catch (e) { if (e instanceof LimitError) throw e; fail++; }
-      if (++done % 500 === 0) log(`  ${done}/${jobs.length}`);
+      if (++done % 200 === 0) log(`  ${done}/${jobs.length} · ${Math.round((Date.now() - t0) / 1000)}초 · 실패 ${fail}`);
     }
   };
   await Promise.all(Array.from({ length: conc }, worker));
   if (fail > Math.max(5, jobs.length * 0.02)) throw new Error(`조회 실패가 너무 많습니다 (${fail}/${jobs.length}) — 저장하지 않습니다`);
+  const fresh = (g) => groups.includes(g);
   const items = GROUPS.map((g) => {
+    if (!fresh(g)) return prev?.items?.find((x) => x.key === g.key) || null;
     const s = sums[g.key], mths = Object.keys(s).sort();
     const last = mths[mths.length - 1], top = last ? Object.entries(tops[g.key][last] || {}).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n, v]) => ({ n, usd: Math.round(v) })) : [];
     return { key: g.key, name: g.name, themeId: g.themeId, codes: g.codes, months: Object.fromEntries(mths.map((m) => [m, Math.round(s[m])])), top };
-  });
+  }).filter(Boolean);
   const all = [...new Set(items.flatMap((x) => Object.keys(x.months)))].sort();
   const latest = all.filter((m) => items.some((x) => x.months[m] > 0)).pop() || "";
   // 다음 달 이후에는 수출이 있었던 국가만 조회한다 (이번에 전체를 돌렸을 때만 갱신)
-  const nextActive = full || !prev?.active ? Object.fromEntries(Object.entries(act).map(([c, s]) => [c, [...s].sort()])) : prev.active;
+  const newAct = Object.fromEntries(Object.entries(act).map(([c, s]) => [c, [...s].sort()]));
+  const nextActive = full || !prev?.active || only ? { ...(prev?.active || {}), ...newAct } : prev.active;
   return { updated: new Date(nowMs).toISOString(), latest, unit: "USD", source: "관세청 신성질별 국가별 수출입실적(수출, 달러)", items, active: nextActive };
 }
 
@@ -105,7 +109,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   let prev = null; try { prev = JSON.parse(fs.readFileSync(out, "utf8")); } catch { /* 첫 실행 */ }
   const mask = (s) => String(s).split(key0).join("***");
   try {
-    const r = await collect({ key, prev, full: process.env.FULL === "1" || !prev, log: (s) => console.log(mask(s)) });
+    const only = (process.env.ONLY || "").split(",").map((x) => x.trim()).filter(Boolean);
+    const r = await collect({ key, prev, full: process.env.FULL === "1" || !prev || only.length > 0, only, log: (s) => console.log(mask(s)) });
     if (!r) process.exit(0);
     fs.writeFileSync(out, JSON.stringify(r));
     console.log(`저장 ${out} · 최신 ${r.latest} · ${r.items.map((x) => `${x.name} ${Math.round((x.months[r.latest] || 0) / 1e6)}백만$`).join(" / ")}`);
