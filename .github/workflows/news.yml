@@ -27,11 +27,13 @@ jobs:
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
         run: node scripts/collect-news.mjs news.json
+      - name: 보관(36시간 삭제와 별개로 하루 단위 파일에 계속 쌓기 + 처음 본 시각 기록)
+        run: node scripts/archive-news.mjs news.json archive
       - name: save
         run: |
           git config user.name "news-bot"
           git config user.email "news-bot@users.noreply.github.com"
-          git add news.json
+          git add news.json archive
           git diff --cached --quiet && exit 0
           git commit -m "news update"
           for i in 1 2 3 4 5; do
