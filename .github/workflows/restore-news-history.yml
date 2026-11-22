@@ -1,0 +1,37 @@
+name: restore-news-history
+# 1회성: 커밋 기록에 남아 있는 과거 news.json을 훑어 archive/ 에 복원합니다. Actions 탭에서 'Run workflow'를 누르세요.
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: write
+concurrency:
+  group: repo-write
+  cancel-in-progress: false
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # 전체 커밋 기록 필요
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 복원
+        run: node scripts/restore-history.mjs news.json archive
+      - name: save
+        run: |
+          git config user.name "news-bot"
+          git config user.email "news-bot@users.noreply.github.com"
+          git add archive
+          git diff --cached --quiet && echo "바뀐 내용 없음" && exit 0
+          git commit -m "restore news history"
+          for i in 1 2 3 4 5; do
+            if git push; then exit 0; fi
+            echo "push 거절 — 최신을 받아 다시 시도 ($i/5)"
+            git pull --rebase origin main || git rebase --abort 2>/dev/null
+            sleep $((i * 2))
+          done
+          echo "::error::5번 시도했지만 저장하지 못했습니다"
+          exit 1

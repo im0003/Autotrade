@@ -1,0 +1,52 @@
+name: backfill-dart
+# 1회성(이어받기 가능): DART 공시를 날짜별로 받아 archive/dart-backfill.json 에 저장합니다. Actions 탭에서 'Run workflow'.
+# 종목을 줄이려면 저장소의 data/codes.txt(줄마다 종목코드) 또는 data/gapup-events.json(앱 '갭상승 사건 목록')을 올려 두세요. 없으면 코스피·코스닥 전체.
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: "시작일 (YYYYMMDD)"
+        required: true
+        default: "20260601"
+      to:
+        description: "끝일 (YYYYMMDD)"
+        required: true
+        default: "20261120"
+permissions:
+  contents: write
+concurrency:
+  group: repo-write
+  cancel-in-progress: false
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 받기
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+        run: |
+          ARGS=""
+          for f in data/gapup-events.json data/codes.txt; do [ -f "$f" ] && ARGS="--codes $f" && break; done
+          node scripts/backfill-dart.mjs --from "$FROM" --to "$TO" $ARGS
+      - name: save
+        run: |
+          git config user.name "news-bot"
+          git config user.email "news-bot@users.noreply.github.com"
+          git add archive
+          git diff --cached --quiet && echo "바뀐 내용 없음" && exit 0
+          git commit -m "backfill dart"
+          for i in 1 2 3 4 5; do
+            if git push; then exit 0; fi
+            echo "push 거절 — 최신을 받아 다시 시도 ($i/5)"
+            git pull --rebase origin main || git rebase --abort 2>/dev/null
+            sleep $((i * 2))
+          done
+          echo "::error::5번 시도했지만 저장하지 못했습니다"
+          exit 1
