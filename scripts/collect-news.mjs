@@ -13,6 +13,16 @@ export const FEEDS = [
   { name: "이데일리 증권", url: "http://rss.edaily.co.kr/stock_news.xml", lang: "ko" },
   { name: "CNBC 시장", url: "https://www.cnbc.com/id/15839069/device/rss/rss.html", lang: "en" },
   { name: "CNBC 기술", url: "https://www.cnbc.com/id/19854910/device/rss/rss.html", lang: "en" },
+  // 미국 경제 매체 확대 — 열리지 않는 주소는 피드별 실패로만 기록되고 나머지는 계속된다
+  { name: "CNBC 주요", url: "https://www.cnbc.com/id/100003114/device/rss/rss.html", lang: "en" },
+  { name: "Yahoo Finance", url: "https://finance.yahoo.com/news/rssindex", lang: "en" },
+  { name: "MarketWatch", url: "https://feeds.content.dowjones.io/public/rss/mw_topstories", lang: "en" },
+  { name: "MarketWatch 실시간", url: "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines", lang: "en" },
+  { name: "Investing 증시", url: "https://www.investing.com/rss/news_25.rss", lang: "en" },
+  // 구글 뉴스 검색 피드: 한국어 '뉴욕증시·특징주' 기사와 영어 '주식시장 오늘' 기사를 한꺼번에 모은다
+  { name: "구글뉴스 뉴욕증시", url: "https://news.google.com/rss/search?q=%EB%89%B4%EC%9A%95%EC%A6%9D%EC%8B%9C+when:1d&hl=ko&gl=KR&ceid=KR:ko", lang: "ko" },
+  { name: "구글뉴스 미국특징주", url: "https://news.google.com/rss/search?q=%EB%AF%B8%EC%A6%9D%EC%8B%9C+%ED%8A%B9%EC%A7%95%EC%A3%BC+when:1d&hl=ko&gl=KR&ceid=KR:ko", lang: "ko" },
+  { name: "구글뉴스 US stocks", url: "https://news.google.com/rss/search?q=stock+market+today+Nasdaq+when:1d&hl=en-US&gl=US&ceid=US:en", lang: "en" },
 ];
 const MAX_AGE_MS = 36 * 3600e3, MAX_ITEMS = 500;
 
