@@ -15,7 +15,7 @@ export const FEEDS = [
   { name: "CNBC 기술", url: "https://www.cnbc.com/id/19854910/device/rss/rss.html", lang: "en" },
   // 미국 경제 매체 확대 — 열리지 않는 주소는 피드별 실패로만 기록되고 나머지는 계속된다
   { name: "CNBC 주요", url: "https://www.cnbc.com/id/100003114/device/rss/rss.html", lang: "en" },
-  { name: "Yahoo Finance", url: "https://finance.yahoo.com/news/rssindex", lang: "en" },
+  { name: "Yahoo Finance", url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EGSPC,NVDA,MU,AMD,TSLA&region=US&lang=en-US", lang: "en" },
   { name: "MarketWatch", url: "https://feeds.content.dowjones.io/public/rss/mw_topstories", lang: "en" },
   { name: "MarketWatch 실시간", url: "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines", lang: "en" },
   { name: "Investing 증시", url: "https://www.investing.com/rss/news_25.rss", lang: "en" },
